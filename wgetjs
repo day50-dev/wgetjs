@@ -7,29 +7,42 @@ const fs = require('fs');
 const path = require('path');
 
 function usage() {
-  console.error(`Usage: wgetjs [options] <url>
+  console.error(`wgetjs - wget for SPAs and JavaScript-heavy websites
 
-Options:
-  -rc              Recursive download (follow links)
-  -np              No parent — don't ascend to the parent directory
-  -P N             Number of parallel workers (default: 1)
-  -l, --level=N    Max recursion depth (default: 5, 0 or inf for infinite)
-  -w SECONDS       Wait SECONDS between retrievals
-  --waitretry=SECONDS  Wait 1..SECONDS between retries (exponential backoff)
-  --random-wait    Wait from 0.5*WAIT to 1.5*WAIT secs between retrievals
-  -A LIST          Comma-separated list of accepted extensions (e.g., html,pdf)
-  -R LIST          Comma-separated list of rejected extensions (e.g., jpg,png)
-  --accept-regex=REGEX  Regex matching accepted URLs
-  --reject-regex=REGEX  Regex matching rejected URLs
-  --regex-type=TYPE     Regex type: posix (default) or pcre
-  -D LIST          Comma-separated list of accepted domains
-  --exclude-domains=LIST  Comma-separated list of rejected domains
-  -H               Span hosts — follow links to other domains
-  -L               Follow relative links only
-  -I LIST          Include only these directories (comma-separated)
-  -X LIST          Exclude these directories (comma-separated)
-  --method=CMD     Command to dump HTML to stdout (default uses CDP)
-  -h, --help       Show this help message`);
+Usage: wgetjs [options] <url>
+
+Download Control:
+  -rc                     Recursive download (follow links)
+  -np                     No parent — don't ascend to parent directories
+  -P, --workers=N         Number of parallel workers (default: 1)
+  -l, --level=N           Max recursion depth (default: 5, 0 or 'inf' for infinite)
+  -w, --wait=SECONDS      Wait SECONDS between retrievals
+  --waitretry=SECONDS     Wait 1..SECONDS between retries (backoff)
+  --random-wait           Randomize wait time (0.5×WAIT to 1.5×WAIT)
+
+URL Filtering:
+  -A, --accept=LIST       Accepted extensions (comma-separated, e.g., html,pdf)
+  -R, --reject=LIST       Rejected extensions (comma-separated, e.g., jpg,png)
+  --accept-regex=REGEX    Accept URLs matching regex
+  --reject-regex=REGEX    Reject URLs matching regex
+  --regex-type=TYPE       Regex type: 'posix' (default) or 'pcre'
+  -D, --domains=LIST      Accepted domains (comma-separated)
+  --exclude-domains=LIST  Rejected domains (comma-separated)
+  -H, --span-hosts        Follow links to other hosts
+  -L, --relative          Follow relative links only
+  -I, --include-dirs=LIST Include only these directories
+  -X, --exclude-dirs=LIST Exclude these directories
+
+Other:
+  --method=CMD            Custom command to fetch HTML (instead of Chrome)
+  -h, --help              Show this help message
+
+Examples:
+  wgetjs -rc -np http://example.com/
+  wgetjs -rc -A html,pdf -R jpg,png http://example.com/
+  wgetjs -rc -P 4 -l 3 http://example.com/
+  wgetjs -rc -D example.com,cdn.example.com http://example.com/
+`);
   process.exit(1);
 }
 
@@ -64,25 +77,27 @@ for (let i = 0; i < args.length; i++) {
     recursive = true;
   } else if (arg === '-np') {
     noParent = true;
-  } else if (arg === '-P') {
-    parallelism = parseInt(args[++i], 10);
+  } else if (arg === '-P' || arg === '--workers') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    parallelism = parseInt(val, 10);
     if (!parallelism || parallelism < 1) {
       console.error('Error: -P requires a positive integer');
       process.exit(1);
     }
   } else if (arg === '-l' || arg === '--level') {
-    const levelArg = args[++i];
-    if (levelArg === 'inf' || levelArg === '0') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    if (val === 'inf' || val === '0') {
       maxDepth = Infinity;
     } else {
-      maxDepth = parseInt(levelArg, 10);
+      maxDepth = parseInt(val, 10);
       if (isNaN(maxDepth) || maxDepth < 0) {
         console.error('Error: -l requires a non-negative integer or 0/inf for infinite');
         process.exit(1);
       }
     }
-  } else if (arg === '-w') {
-    waitSeconds = parseFloat(args[++i]);
+  } else if (arg === '-w' || arg === '--wait') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    waitSeconds = parseFloat(val);
     if (isNaN(waitSeconds) || waitSeconds < 0) {
       console.error('Error: -w requires a non-negative number');
       process.exit(1);
@@ -95,10 +110,12 @@ for (let i = 0; i < args.length; i++) {
     }
   } else if (arg === '--random-wait') {
     randomWait = true;
-  } else if (arg === '-A') {
-    acceptExts = args[++i].split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  } else if (arg === '-R') {
-    rejectExts = args[++i].split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  } else if (arg === '-A' || arg === '--accept') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    acceptExts = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  } else if (arg === '-R' || arg === '--reject') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    rejectExts = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   } else if (arg.startsWith('--accept-regex=')) {
     acceptRegex = arg.slice('--accept-regex='.length);
   } else if (arg.startsWith('--reject-regex=')) {
@@ -109,18 +126,21 @@ for (let i = 0; i < args.length; i++) {
       console.error('Error: --regex-type must be posix or pcre');
       process.exit(1);
     }
-  } else if (arg === '-D') {
-    allowedDomains = args[++i].split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  } else if (arg === '-D' || arg === '--domains') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    allowedDomains = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   } else if (arg.startsWith('--exclude-domains=')) {
     excludedDomains = arg.slice('--exclude-domains='.length).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   } else if (arg === '-H' || arg === '--span-hosts') {
     spanHosts = true;
   } else if (arg === '-L' || arg === '--relative') {
     relativeOnly = true;
-  } else if (arg === '-I') {
-    includeDirs = args[++i].split(',').map(s => s.trim()).filter(Boolean);
-  } else if (arg === '-X') {
-    excludeDirs = args[++i].split(',').map(s => s.trim()).filter(Boolean);
+  } else if (arg === '-I' || arg === '--include-dirs') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    includeDirs = val.split(',').map(s => s.trim()).filter(Boolean);
+  } else if (arg === '-X' || arg === '--exclude-dirs') {
+    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
+    excludeDirs = val.split(',').map(s => s.trim()).filter(Boolean);
   } else if (arg.startsWith('--method=')) {
     method = arg.slice('--method='.length);
   } else if (arg === '--method') {
