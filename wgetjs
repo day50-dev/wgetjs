@@ -13,7 +13,7 @@ Options:
   -rc              Recursive download (follow links)
   -np              No parent — don't ascend to the parent directory
   -P N             Number of parallel workers (default: 1)
-  -l N             Max recursion depth (default: 5)
+  -l, --level=N    Max recursion depth (default: 5, 0 or inf for infinite)
   -w SECONDS       Wait SECONDS between retrievals
   --waitretry=SECONDS  Wait 1..SECONDS between retries (exponential backoff)
   --random-wait    Wait from 0.5*WAIT to 1.5*WAIT secs between retrievals
@@ -70,11 +70,16 @@ for (let i = 0; i < args.length; i++) {
       console.error('Error: -P requires a positive integer');
       process.exit(1);
     }
-  } else if (arg === '-l') {
-    maxDepth = parseInt(args[++i], 10);
-    if (isNaN(maxDepth) || maxDepth < 0) {
-      console.error('Error: -l requires a non-negative integer');
-      process.exit(1);
+  } else if (arg === '-l' || arg === '--level') {
+    const levelArg = args[++i];
+    if (levelArg === 'inf' || levelArg === '0') {
+      maxDepth = Infinity;
+    } else {
+      maxDepth = parseInt(levelArg, 10);
+      if (isNaN(maxDepth) || maxDepth < 0) {
+        console.error('Error: -l requires a non-negative integer or 0/inf for infinite');
+        process.exit(1);
+      }
     }
   } else if (arg === '-w') {
     waitSeconds = parseFloat(args[++i]);

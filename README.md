@@ -47,7 +47,7 @@ wgetjs -rc --accept-regex='/docs/.*' http://somesite.com/
 | `-rc` | Recursive download (follow links) |
 | `-np` | No parent — don't ascend to parent directories |
 | `-P N` | Number of parallel workers (default: 1) |
-| `-l N` | Max recursion depth (default: 5) |
+| `-l N`, `--level=N` | Max recursion depth (default: 5, use `0` or `inf` for infinite) |
 | `-w SECONDS` | Wait SECONDS between retrievals |
 | `--waitretry=SECONDS` | Wait 1..SECONDS between retries (backoff) |
 | `--random-wait` | Wait 0.5×WAIT to 1.5×WAIT secs (randomized) |
