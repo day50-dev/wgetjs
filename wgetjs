@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { quote: shellEscape } = require('shell-quote');
+const getopts = require('getopts');
 
 function usage() {
   console.error(`wgetjs - wget for SPAs and JavaScript-heavy websites
@@ -13,7 +14,8 @@ function usage() {
 Usage: wgetjs [options] <url>
 
 Download Control:
-  -rc                     Recursive download (follow links)
+  -r                      Recursive download (follow links)
+  -c                      Continue (resume partial downloads)
   -np                     No parent — don't ascend to parent directories
   -P, --workers=N         Number of parallel workers (default: 1)
   -l, --level=N           Max recursion depth (default: 5, 0 or 'inf' for infinite)
@@ -41,141 +43,111 @@ Other:
   -h, --help              Show this help message
 
 Examples:
-  wgetjs -rc -np http://example.com/
-  wgetjs -rc -A html,pdf -R jpg,png http://example.com/
-  wgetjs -rc -P 4 -l 3 http://example.com/
-  wgetjs -rc -D example.com,cdn.example.com http://example.com/
+  wgetjs -r -c -np http://example.com/
+  wgetjs -r -A html,pdf -R jpg,png http://example.com/
+  wgetjs -r -P 4 -l 3 http://example.com/
+  wgetjs -r -D example.com,cdn.example.com http://example.com/
   wgetjs --method='curl -s {}' http://example.com/
   wgetjs --method='playwright fetch {}' http://example.com/
 `);
   process.exit(1);
 }
 
-// Parse arguments
-const args = process.argv.slice(2);
-let recursive = false;
-let noParent = false;
-let method = null;
-let parallelism = 1;
-let maxDepth = 5;
-let waitSeconds = 0;
-let waitRetry = 0;
-let randomWait = false;
-let startUrl = null;
+// Parse arguments using getopts (GNU getopt compatible)
+const opts = getopts(process.argv.slice(2), {
+  boolean: ['r', 'c', 'np', 'H', 'L', 'random-wait', 'ignore-case', 'h', 'help'],
+  string: ['P', 'workers', 'l', 'level', 'w', 'wait', 'waitretry', 'A', 'accept', 'R', 'reject',
+    'accept-regex', 'reject-regex', 'regex-type', 'D', 'domains', 'exclude-domains',
+    'I', 'include-dirs', 'X', 'exclude-dirs', 'post', 'method', 'P'],
+  alias: {
+    'r': ['recursive'],
+    'c': ['continue'],
+    'np': ['no-parent'],
+    'P': ['workers', 'directory-prefix'],
+    'l': ['level'],
+    'w': ['wait'],
+    'A': ['accept'],
+    'R': ['reject'],
+    'D': ['domains'],
+    'H': ['span-hosts'],
+    'L': ['relative'],
+    'I': ['include-dirs'],
+    'X': ['exclude-dirs'],
+    'h': ['help'],
+  },
+  default: {
+    workers: 1,
+    level: 5,
+    wait: 0,
+    'regex-type': 'posix',
+  },
+});
 
-// Filter options
-let acceptExts = null;
-let rejectExts = null;
-let acceptRegex = null;
-let rejectRegex = null;
-let regexType = 'posix';
-let allowedDomains = null;
-let excludedDomains = null;
-let spanHosts = false;
-let relativeOnly = false;
-let includeDirs = null;
-let excludeDirs = null;
-let ignoreCase = false;
-let postCommand = null;
-
-for (let i = 0; i < args.length; i++) {
-  const arg = args[i];
-  if (arg === '-rc' || arg === '-r') {
-    recursive = true;
-  } else if (arg === '-np') {
-    noParent = true;
-  } else if (arg === '-P' || arg === '--workers') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    parallelism = parseInt(val, 10);
-    if (!parallelism || parallelism < 1) {
-      console.error('Error: -P requires a positive integer');
-      process.exit(1);
-    }
-  } else if (arg === '-l' || arg === '--level') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    if (val === 'inf' || val === '0') {
-      maxDepth = Infinity;
-    } else {
-      maxDepth = parseInt(val, 10);
-      if (isNaN(maxDepth) || maxDepth < 0) {
-        console.error('Error: -l requires a non-negative integer or 0/inf for infinite');
-        process.exit(1);
-      }
-    }
-  } else if (arg === '-w' || arg === '--wait') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    waitSeconds = parseFloat(val);
-    if (isNaN(waitSeconds) || waitSeconds < 0) {
-      console.error('Error: -w requires a non-negative number');
-      process.exit(1);
-    }
-  } else if (arg.startsWith('--waitretry=')) {
-    waitRetry = parseFloat(arg.slice('--waitretry='.length));
-    if (isNaN(waitRetry) || waitRetry < 0) {
-      console.error('Error: --waitretry requires a non-negative number');
-      process.exit(1);
-    }
-  } else if (arg === '--random-wait') {
-    randomWait = true;
-  } else if (arg === '-A' || arg === '--accept') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    acceptExts = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  } else if (arg === '-R' || arg === '--reject') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    rejectExts = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  } else if (arg.startsWith('--accept-regex=')) {
-    acceptRegex = arg.slice('--accept-regex='.length);
-  } else if (arg.startsWith('--reject-regex=')) {
-    rejectRegex = arg.slice('--reject-regex='.length);
-  } else if (arg.startsWith('--regex-type=')) {
-    regexType = arg.slice('--regex-type='.length);
-    if (regexType !== 'posix' && regexType !== 'pcre') {
-      console.error('Error: --regex-type must be posix or pcre');
-      process.exit(1);
-    }
-  } else if (arg === '-D' || arg === '--domains') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    allowedDomains = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  } else if (arg.startsWith('--exclude-domains=')) {
-    excludedDomains = arg.slice('--exclude-domains='.length).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  } else if (arg === '-H' || arg === '--span-hosts') {
-    spanHosts = true;
-  } else if (arg === '-L' || arg === '--relative') {
-    relativeOnly = true;
-  } else if (arg === '-I' || arg === '--include-dirs') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    includeDirs = val.split(',').map(s => s.trim()).filter(Boolean);
-  } else if (arg === '-X' || arg === '--exclude-dirs') {
-    const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
-    excludeDirs = val.split(',').map(s => s.trim()).filter(Boolean);
-  } else if (arg === '--ignore-case') {
-    ignoreCase = true;
-  } else if (arg.startsWith('--post=')) {
-    postCommand = arg.slice('--post='.length);
-  } else if (arg.startsWith('--method=')) {
-    method = arg.slice('--method='.length);
-  } else if (arg === '--method') {
-    method = args[++i];
-  } else if (arg === '-h' || arg === '--help') {
-    usage();
-  } else if (!arg.startsWith('-')) {
-    startUrl = arg;
-  } else {
-    console.error(`Unknown option: ${arg}`);
-    usage();
-  }
+if (opts.help) {
+  usage();
 }
 
+// Extract options
+const startUrl = opts._[0];
 if (!startUrl) {
   console.error('Error: URL is required');
   usage();
 }
 
-if (!/^https?:\/\//i.test(startUrl)) {
-  startUrl = 'http://' + startUrl;
+let startUrlWithScheme = startUrl;
+if (!/^https?:\/\//i.test(startUrlWithScheme)) {
+  startUrlWithScheme = 'http://' + startUrlWithScheme;
 }
 
-const startParsed = new URL(startUrl);
+const startParsed = new URL(startUrlWithScheme);
+
+// Convenience variables from parsed options
+const recursive = opts.r;
+const noParent = opts.np;
+const continueMode = opts.c;
+const parallelism = parseInt(opts.workers, 10);
+const maxDepth = (opts.level === 'inf' || opts.level === '0') ? Infinity : parseInt(opts.level, 10);
+const waitSeconds = parseFloat(opts.wait) || 0;
+const waitRetry = parseFloat(opts.waitretry) || 0;
+const randomWait = opts['random-wait'];
+const method = opts.method;
+const postCommand = opts.post;
+const spanHosts = opts.H;
+const relativeOnly = opts.L;
+const ignoreCase = opts['ignore-case'];
+
+// Filter options - handle arrays and comma-separated values
+const acceptExts = opts.accept ? opts.accept.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : null;
+const rejectExts = opts.reject ? opts.reject.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : null;
+const acceptRegex = opts['accept-regex'] || null;
+const rejectRegex = opts['reject-regex'] || null;
+const regexType = opts['regex-type'] || 'posix';
+const allowedDomains = opts.domains ? opts.domains.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : null;
+const excludedDomains = opts['exclude-domains'] ? opts['exclude-domains'].split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : null;
+const includeDirs = opts['include-dirs'] ? opts['include-dirs'].split(',').map(s => s.trim()).filter(Boolean) : null;
+const excludeDirs = opts['exclude-dirs'] ? opts['exclude-dirs'].split(',').map(s => s.trim()).filter(Boolean) : null;
+
+// Validate options
+if (regexType !== 'posix' && regexType !== 'pcre') {
+  console.error('Error: --regex-type must be posix or pcre');
+  process.exit(1);
+}
+if (!parallelism || parallelism < 1) {
+  console.error('Error: -P/--workers requires a positive integer');
+  process.exit(1);
+}
+if (isNaN(maxDepth) || maxDepth < 0) {
+  console.error('Error: -l/--level requires a non-negative integer or 0/inf for infinite');
+  process.exit(1);
+}
+if (isNaN(waitSeconds) || waitSeconds < 0) {
+  console.error('Error: -w/--wait requires a non-negative number');
+  process.exit(1);
+}
+if (isNaN(waitRetry) || waitRetry < 0) {
+  console.error('Error: --waitretry requires a non-negative number');
+  process.exit(1);
+}
 
 // --- CDP browser session ---
 

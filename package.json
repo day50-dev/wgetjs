@@ -13,7 +13,14 @@
     "type": "git",
     "url": "git+https://github.com/kristopolous/wgetjs.git"
   },
-  "keywords": ["wget", "scraper", "crawler", "spa", "headless", "chrome"],
+  "keywords": [
+    "wget",
+    "scraper",
+    "crawler",
+    "spa",
+    "headless",
+    "chrome"
+  ],
   "author": "",
   "license": "ISC",
   "bugs": {
@@ -21,6 +28,7 @@
   },
   "homepage": "https://github.com/kristopolous/wgetjs#readme",
   "dependencies": {
+    "getopts": "^2.3.0",
     "shell-quote": "^1.8.3"
   }
 }
