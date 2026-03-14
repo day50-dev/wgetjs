@@ -6,12 +6,7 @@ wgetjs is a command-line tool that brings wget-style recursive downloading to mo
 
 ## Why wgetjs?
 
-Traditional tools like `wget` and `curl` only download the initial HTML response. For sites built with React, Vue, Angular, or any framework that renders content client-side, you end up with empty shells. wgetjs solves this by:
-
-- **Rendering JavaScript** - Executes all client-side code before capturing HTML
-- **Waiting for dynamic content** - Lets SPAs fully load before saving
-- **Recursive crawling** - Follows links through JavaScript-rendered navigation
-- **Multiple workers** - Parallel downloads with `-P` for faster mirroring
+Traditional tools like `wget` and `curl` can't deal with Javascript. You know this, I know this, the whole internet does. Why do we have to write code to `wget -rc` a site with javascript? That's stupid. 
 
 ## Usage
 
@@ -36,6 +31,9 @@ wgetjs -rc -D example.com,cdn.example.com http://example.com/
 
 # Accept only URLs matching a pattern
 wgetjs -rc --accept-regex='/docs/.*' http://somesite.com/
+
+# Convert downloaded HTML to markdown
+wgetjs -rc --post='markitdown {} > {}.md' http://example.com/
 ```
 
 ## Options
@@ -56,17 +54,19 @@ wgetjs -rc --accept-regex='/docs/.*' http://somesite.com/
 
 | Option | Description |
 |--------|-------------|
-| `-A LIST` | Accept only these extensions (e.g., `html,pdf`) |
-| `-R LIST` | Reject these extensions (e.g., `jpg,png`) |
-| `--accept-regex=REGEX` | Only accept URLs matching regex |
+| `-A LIST`, `--accept=LIST` | Accept extensions/patterns (e.g., `html,pdf`, `*.mp3`) |
+| `-R LIST`, `--reject=LIST` | Reject extensions/patterns (e.g., `jpg,png`, `*.[zb]p2`) |
+| `--accept-regex=REGEX` | Accept URLs matching regex |
 | `--reject-regex=REGEX` | Reject URLs matching regex |
 | `--regex-type=TYPE` | Regex type: `posix` (default) or `pcre` |
-| `-D LIST` | Only follow these domains (comma-separated) |
-| `--exclude-domains=LIST` | Never follow these domains |
-| `-H` | Span hosts — follow links to other domains |
-| `-L` | Follow relative links only |
-| `-I LIST` | Include only these directories |
-| `-X LIST` | Exclude these directories |
+| `-D LIST`, `--domains=LIST` | Accepted domains (requires `-H`) |
+| `--exclude-domains=LIST` | Rejected domains |
+| `-H`, `--span-hosts` | Follow links to other hosts |
+| `-L`, `--relative` | Follow relative links only |
+| `-I LIST`, `--include-dirs=LIST` | Include directories (wildcards supported) |
+| `-X LIST`, `--exclude-dirs=LIST` | Exclude directories (wildcards supported) |
+| `--ignore-case` | Ignore case when matching patterns |
+| `--post=CMD` | Run command after each download (`{}` = file path) |
 
 ### Other
 
@@ -80,11 +80,15 @@ wgetjs -rc --accept-regex='/docs/.*' http://somesite.com/
 By default, wgetjs uses headless Chrome via the Chrome DevTools Protocol. If you prefer a different renderer, use `--method` with a command that outputs HTML to stdout:
 
 ```bash
-# Example with lightpanda
+# URL is appended by default
 wgetjs --method="lightpanda fetch --dump" http://somesite.com/
+
+# Or use {} for explicit URL placement (like --post)
+wgetjs --method="curl -s {} | tidy -q -" http://somesite.com/
+wgetjs --method="playwright fetch {} --html" http://somesite.com/
 ```
 
 ## Requirements
 
 - Node.js
-- Google Chrome (or Chromium) installed and in PATH
+- Google Chrome (or Chromium) installed and PATH

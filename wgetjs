@@ -5,6 +5,7 @@ const { URL } = require('url');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { quote: shellEscape } = require('shell-quote');
 
 function usage() {
   console.error(`wgetjs - wget for SPAs and JavaScript-heavy websites
@@ -32,9 +33,11 @@ URL Filtering:
   -L, --relative          Follow relative links only
   -I, --include-dirs=LIST Include only these directories
   -X, --exclude-dirs=LIST Exclude these directories
+  --ignore-case         Ignore case when matching files/directories
+  --post=CMD            Run CMD after each download ({} = downloaded file path)
 
 Other:
-  --method=CMD            Custom command to fetch HTML (instead of Chrome)
+  --method=CMD          Custom fetch command ({} = URL, appended by default)
   -h, --help              Show this help message
 
 Examples:
@@ -42,6 +45,8 @@ Examples:
   wgetjs -rc -A html,pdf -R jpg,png http://example.com/
   wgetjs -rc -P 4 -l 3 http://example.com/
   wgetjs -rc -D example.com,cdn.example.com http://example.com/
+  wgetjs --method='curl -s {}' http://example.com/
+  wgetjs --method='playwright fetch {}' http://example.com/
 `);
   process.exit(1);
 }
@@ -70,6 +75,8 @@ let spanHosts = false;
 let relativeOnly = false;
 let includeDirs = null;
 let excludeDirs = null;
+let ignoreCase = false;
+let postCommand = null;
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -141,6 +148,10 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg === '-X' || arg === '--exclude-dirs') {
     const val = arg.includes('=') ? arg.split('=')[1] : args[++i];
     excludeDirs = val.split(',').map(s => s.trim()).filter(Boolean);
+  } else if (arg === '--ignore-case') {
+    ignoreCase = true;
+  } else if (arg.startsWith('--post=')) {
+    postCommand = arg.slice('--post='.length);
   } else if (arg.startsWith('--method=')) {
     method = arg.slice('--method='.length);
   } else if (arg === '--method') {
@@ -314,7 +325,14 @@ async function cdpFetchPage(session, url) {
 // --- Fallback: exec per invocation for custom --method ---
 
 function execFetchPage(url) {
-  const cmd = `${method} '${url.replace(/'/g, "'\\''")}'`;
+  let cmd;
+  if (method.includes('{}')) {
+    // Use {} substitution syntax (consistent with --post)
+    cmd = method.replace(/\{\}/g, shellEscape([url]));
+  } else {
+    // Legacy behavior: append URL at the end
+    cmd = `${method} ${shellEscape([url])}`;
+  }
   try {
     const html = execSync(cmd, {
       encoding: 'utf-8',
@@ -405,6 +423,23 @@ function savePage(urlStr, html) {
   filePath = resolveConflict(filePath);
   fs.writeFileSync(filePath, html, 'utf-8');
   console.log(`  Saved: ${filePath}`);
+  return filePath;
+}
+
+function runPostProcess(filePath) {
+  if (!postCommand) return;
+  
+  // Substitute {} with the properly shell-escaped file path using shell-quote library
+  const cmd = postCommand.replace(/\{\}/g, shellEscape([filePath]));
+  
+  try {
+    execSync(cmd, {
+      stdio: ['pipe', 'inherit', 'inherit'],
+      timeout: 60000,
+    });
+  } catch (e) {
+    console.error(`  Post-process failed: ${cmd}`);
+  }
 }
 
 function extractLinks(html, baseUrl) {
@@ -457,12 +492,56 @@ function matchRegex(str, pattern, type) {
   }
 }
 
-function matchDirectory(urlPath, dirList) {
-  // Check if URL path starts with any of the directories in the list
-  // Directories should end with / for proper prefix matching
+function matchPattern(str, pattern, ignoreCase = false) {
+  // Match shell-style wildcard patterns: *, ?, [...]
+  try {
+    // Convert shell pattern to regex
+    let regex = pattern
+      .replace(/[.+^${}|[\]\\]/g, '\\$&')  // escape special chars except * ? [ ]
+      .replace(/\?/g, '.')                  // ? matches single char
+      .replace(/\*/g, '.*');                // * matches anything
+    
+    // Handle [...] character classes
+    regex = regex.replace(/\[([^\]]+)\]/g, (match, chars) => {
+      // Convert [abc] to (a|b|c) and [a-z] to character class
+      if (chars.includes('-')) {
+        // It's a range like [a-z]
+        return `[${chars}]`;
+      }
+      // It's a list like [abc]
+      return `[${chars}]`;
+    });
+    
+    const flags = ignoreCase ? 'i' : '';
+    return new RegExp('^' + regex + '$', flags).test(str);
+  } catch {
+    return false;
+  }
+}
+
+function matchPatternList(str, patternList, ignoreCase = false) {
+  // Check if string matches any pattern in the list
+  for (const pattern of patternList) {
+    if (matchPattern(str, pattern, ignoreCase)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function matchDirectory(urlPath, dirList, ignoreCase = false) {
+  // Check if URL path matches any directory pattern (supports wildcards)
+  // Each pattern can be a prefix or a wildcard pattern
   for (let dir of dirList) {
+    // Normalize: ensure directory patterns end with /
     if (!dir.endsWith('/')) dir += '/';
-    if (urlPath.startsWith(dir) || urlPath === dir.slice(0, -1)) {
+    
+    // Try exact prefix match first (with wildcard support)
+    if (matchPattern(urlPath, dir + '*', ignoreCase)) {
+      return true;
+    }
+    // Also match the directory path itself (without trailing content)
+    if (matchPattern(urlPath, dir, ignoreCase)) {
       return true;
     }
   }
@@ -488,8 +567,9 @@ function shouldFollow(urlStr) {
       return false;
     }
 
-    // Domain filtering: -D (allowed domains)
-    if (allowedDomains && !allowedDomains.includes(parsed.hostname.toLowerCase())) {
+    // Domain filtering: -D (allowed domains) - only applies when -H is set
+    // Per wget.man: "Note that it does not turn on -H"
+    if (spanHosts && allowedDomains && !allowedDomains.includes(parsed.hostname.toLowerCase())) {
       return false;
     }
 
@@ -505,26 +585,28 @@ function shouldFollow(urlStr) {
       if (!parsed.pathname.startsWith(basePath)) return false;
     }
 
-    // -I: include directories
-    if (includeDirs && !matchDirectory(parsed.pathname, includeDirs)) {
+    // -I: include directories (with wildcard support)
+    if (includeDirs && !matchDirectory(parsed.pathname, includeDirs, ignoreCase)) {
       return false;
     }
 
-    // -X: exclude directories
-    if (excludeDirs && matchDirectory(parsed.pathname, excludeDirs)) {
+    // -X: exclude directories (with wildcard support)
+    if (excludeDirs && matchDirectory(parsed.pathname, excludeDirs, ignoreCase)) {
       return false;
     }
 
-    // Extension filtering: -A (accept)
+    // Extension filtering: -A (accept) - supports wildcards like *.mp3
     if (acceptExts) {
       const ext = path.extname(parsed.pathname).toLowerCase().replace(/^\./, '');
-      if (!acceptExts.includes(ext)) return false;
+      // Check if extension matches any accept pattern
+      if (!matchPatternList(ext, acceptExts, ignoreCase)) return false;
     }
 
-    // Extension filtering: -R (reject)
+    // Extension filtering: -R (reject) - supports wildcards like *.jpg
     if (rejectExts) {
       const ext = path.extname(parsed.pathname).toLowerCase().replace(/^\./, '');
-      if (rejectExts.includes(ext)) return false;
+      // Check if extension matches any reject pattern
+      if (matchPatternList(ext, rejectExts, ignoreCase)) return false;
     }
 
     // Regex filtering: --accept-regex
@@ -708,7 +790,8 @@ async function main() {
       const result = await fetchPage(url);
       if (!result) continue;
 
-      savePage(url, result.rendered);
+      const savedPath = savePage(url, result.rendered);
+      runPostProcess(savedPath);
       downloaded++;
       lastDownloadTime = Date.now();
 
