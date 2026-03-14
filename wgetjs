@@ -634,38 +634,41 @@ function normalizeUrl(urlStr) {
   return parsed.href;
 }
 
-// --- Work queue with wait/notify ---
+// --- Work queue with wait/notify and proper termination signaling ---
 
 class WorkQueue {
   constructor() {
     this._items = [];
     this._waiters = [];
-    this._done = false;
+    this._finished = false;
   }
 
   push(url) {
+    if (this._finished) return;
     this._items.push(url);
-    if (this._waiters.length > 0) {
-      this._waiters.shift()();
-    }
+    if (this._waiters.length > 0) this._waiters.shift()();
   }
 
   // Returns a URL or null if done
   async take() {
     while (true) {
       if (this._items.length > 0) return this._items.shift();
-      if (this._done) return null;
+      if (this._finished) return null;
       await new Promise((resolve) => this._waiters.push(resolve));
+      if (this._finished) return null;
     }
   }
 
+  // Signal no more work will be added and wake all waiters
   finish() {
-    this._done = true;
+    if (this._finished) return;
+    this._finished = true;
     for (const wake of this._waiters) wake();
     this._waiters = [];
   }
 
   get length() { return this._items.length; }
+  get isDone() { return this._finished; }
 }
 
 // --- Worker pool ---
@@ -726,7 +729,8 @@ async function main() {
   }
 
   let downloaded = 0;
-  let idleCount = 0;
+  // Track pending work items - incremented on enqueue, decremented on complete
+  let pending = 1;  // Start with 1 for the seed URL
 
   function enqueueLinks(html, baseUrl, depth) {
     if (depth >= maxDepth) return;
@@ -734,6 +738,7 @@ async function main() {
       const normalized = normalizeUrl(link);
       if (!visited.has(normalized) && shouldFollow(normalized)) {
         visited.add(normalized);
+        pending++;
         queue.push({ url: normalized, depth: depth + 1 });
       }
     }
@@ -756,19 +761,12 @@ async function main() {
     let lastDownloadTime = 0;
 
     while (true) {
-      // Yield before checking queue so other workers get a chance to wake
-      await new Promise((r) => setImmediate(r));
-
-      // Mark idle before waiting for work
-      idleCount++;
-      if (idleCount === parallelism && queue.length === 0) {
-        // All workers idle and queue empty — we're done
-        queue.finish();
+      const item = await queue.take();
+      if (item === null) {
+        if (pending === 0) queue.finish();
+        break;
       }
 
-      const item = await queue.take();
-      idleCount--;
-      if (item === null) break;
       const { url, depth } = item;
 
       const filePath = urlToFilePath(url);
@@ -778,26 +776,32 @@ async function main() {
           const html = fs.readFileSync(filePath, 'utf-8');
           enqueueLinks(html, url, depth);
         }
+        pending--;
+        if (pending === 0 && queue.length === 0 && !queue.isDone) queue.finish();
         continue;
       }
 
-      // Apply wait between retrievals (only if there was a previous download)
+      // Apply wait between retrievals
       if (lastDownloadTime > 0 && (waitSeconds > 0 || randomWait)) {
         await applyWait();
       }
 
       console.log(`[W${workerIdx}] Fetching: ${url}`);
       const result = await fetchPage(url);
-      if (!result) continue;
 
-      const savedPath = savePage(url, result.rendered);
-      runPostProcess(savedPath);
-      downloaded++;
-      lastDownloadTime = Date.now();
+      if (result) {
+        const savedPath = savePage(url, result.rendered);
+        runPostProcess(savedPath);
+        downloaded++;
+        lastDownloadTime = Date.now();
 
-      if (recursive) {
-        enqueueLinks(result.rendered, url, depth);
+        if (recursive) {
+          enqueueLinks(result.rendered, url, depth);
+        }
       }
+
+      pending--;
+      if (pending === 0 && queue.length === 0 && !queue.isDone) queue.finish();
     }
   }
 
@@ -810,7 +814,18 @@ async function main() {
 
   console.log(`\nDone. Downloaded ${downloaded} page(s), ${visited.size} total visited.`);
 
-  // Cleanup is handled by process exit handlers
+  // Cleanup: close WebSockets and kill Chrome
+  for (const s of sessions) {
+    try { if (s.ws && s.ws.readyState === 1) s.ws.close(); } catch {}
+  }
+  await new Promise(r => setTimeout(r, 500));
+  for (const p of chromeProcs) {
+    try { p.kill('SIGTERM'); } catch {}
+  }
+  setTimeout(() => {
+    for (const p of chromeProcs) { try { p.kill('SIGKILL'); } catch {} }
+    process.exit(0);
+  }, 1000);
 }
 
 main().catch((e) => {
