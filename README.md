@@ -1,12 +1,10 @@
 # wgetjs
 
-**wget for Single Page Applications (SPAs) and JavaScript-heavy websites**
+`wget` and `curl` can't deal with Javascript. You know this, I know this, the whole internet does. Why do we have to write code to `wget -rc` a site with javascript? That's stupid. 
+
+So finally, **wget for Single Page Applications (SPAs) and JavaScript websites.** About fucking time.
 
 wgetjs is a command-line tool that brings wget-style recursive downloading to modern dynamic websites. Unlike traditional wget, wgetjs uses a headless Chrome browser to render JavaScript, ensuring you capture the fully-rendered HTML that SPAs and dynamic sites generate.
-
-## Why wgetjs?
-
-Traditional tools like `wget` and `curl` can't deal with Javascript. You know this, I know this, the whole internet does. Why do we have to write code to `wget -rc` a site with javascript? That's stupid. 
 
 ## Usage
 
