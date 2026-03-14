@@ -54,16 +54,19 @@ Examples:
 }
 
 // Parse arguments using getopts (GNU getopt compatible)
+// Note: Combined short flags like -rc and -np are expanded by getopts
+// We need to include all single-letter flags as booleans to prevent them
+// from consuming subsequent arguments as values
 const opts = getopts(process.argv.slice(2), {
-  boolean: ['r', 'c', 'np', 'H', 'L', 'random-wait', 'ignore-case', 'h', 'help'],
+  boolean: ['r', 'c', 'n', 'p', 'H', 'L', 'random-wait', 'ignore-case', 'h', 'help'],
   string: ['P', 'workers', 'l', 'level', 'w', 'wait', 'waitretry', 'A', 'accept', 'R', 'reject',
     'accept-regex', 'reject-regex', 'regex-type', 'D', 'domains', 'exclude-domains',
-    'I', 'include-dirs', 'X', 'exclude-dirs', 'post', 'method', 'P'],
+    'I', 'include-dirs', 'X', 'exclude-dirs', 'post', 'method'],
   alias: {
     'r': ['recursive'],
     'c': ['continue'],
     'np': ['no-parent'],
-    'P': ['workers', 'directory-prefix'],
+    'P': ['workers'],
     'l': ['level'],
     'w': ['wait'],
     'A': ['accept'],
@@ -101,9 +104,11 @@ if (!/^https?:\/\//i.test(startUrlWithScheme)) {
 
 const startParsed = new URL(startUrlWithScheme);
 
+// Handle -np: getopts expands it to -n -p, so check for combined np or n+p both being true
+const noParent = opts.np || (opts.n && opts.p);
+
 // Convenience variables from parsed options
 const recursive = opts.r;
-const noParent = opts.np;
 const continueMode = opts.c;
 const parallelism = parseInt(opts.workers, 10);
 const maxDepth = (opts.level === 'inf' || opts.level === '0') ? Infinity : parseInt(opts.level, 10);
