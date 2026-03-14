@@ -24,9 +24,23 @@ wgetjs -rc -np -P 4 http://somesite.com/
 
 # Limit recursion depth
 wgetjs -rc -l 3 http://somesite.com/
+
+# Only download HTML and PDF files
+wgetjs -rc -A html,pdf http://somesite.com/
+
+# Exclude images and certain directories
+wgetjs -rc -R jpg,png,gif -X /admin,/private http://somesite.com/
+
+# Only follow links within specific domains
+wgetjs -rc -D example.com,cdn.example.com http://example.com/
+
+# Accept only URLs matching a pattern
+wgetjs -rc --accept-regex='/docs/.*' http://somesite.com/
 ```
 
 ## Options
+
+### Download Control
 
 | Option | Description |
 |--------|-------------|
@@ -37,6 +51,27 @@ wgetjs -rc -l 3 http://somesite.com/
 | `-w SECONDS` | Wait SECONDS between retrievals |
 | `--waitretry=SECONDS` | Wait 1..SECONDS between retries (backoff) |
 | `--random-wait` | Wait 0.5×WAIT to 1.5×WAIT secs (randomized) |
+
+### URL Filtering
+
+| Option | Description |
+|--------|-------------|
+| `-A LIST` | Accept only these extensions (e.g., `html,pdf`) |
+| `-R LIST` | Reject these extensions (e.g., `jpg,png`) |
+| `--accept-regex=REGEX` | Only accept URLs matching regex |
+| `--reject-regex=REGEX` | Reject URLs matching regex |
+| `--regex-type=TYPE` | Regex type: `posix` (default) or `pcre` |
+| `-D LIST` | Only follow these domains (comma-separated) |
+| `--exclude-domains=LIST` | Never follow these domains |
+| `-H` | Span hosts — follow links to other domains |
+| `-L` | Follow relative links only |
+| `-I LIST` | Include only these directories |
+| `-X LIST` | Exclude these directories |
+
+### Other
+
+| Option | Description |
+|--------|-------------|
 | `--method=CMD` | Custom command to fetch HTML (alternative to Chrome) |
 | `-h, --help` | Show help |
 
