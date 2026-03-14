@@ -35,7 +35,13 @@ wgetjs -rc -D example.com,cdn.example.com http://example.com/
 wgetjs -rc --accept-regex='/docs/.*' http://somesite.com/
 
 # Convert downloaded HTML to markdown
-wgetjs -rc --post='markitdown {} > {}.md' http://example.com/
+wgetjs -rc --post='text/html:markitdown {} > {}.md' http://example.com/
+
+# Convert images to webp and HTML to markdown
+wgetjs -rc --post='image/*:convert {} {}.webp\ntext/html:markitdown {} > {}.md' http://example.com/
+
+# Read post-processing rules from a file
+wgetjs -rc --post=@post-rules.txt http://example.com/
 ```
 
 ## Options
@@ -68,7 +74,7 @@ wgetjs -rc --post='markitdown {} > {}.md' http://example.com/
 | `-I LIST`, `--include-dirs=LIST` | Include directories (wildcards supported) |
 | `-X LIST`, `--exclude-dirs=LIST` | Exclude directories (wildcards supported) |
 | `--ignore-case` | Ignore case when matching patterns |
-| `--post=CMD` | Run command after each download (`{}` = file path) |
+| `--post=RULES` | Run post-processing commands scoped by MIME type (see below) |
 
 ### Other
 
@@ -77,6 +83,32 @@ wgetjs -rc --post='markitdown {} > {}.md' http://example.com/
 | `-E`, `--adjust-extension` | Append `.html` to filenames that don't already have an HTML extension |
 | `--method=CMD` | Custom command to fetch HTML (alternative to Chrome) |
 | `-h, --help` | Show help |
+
+## Post-Processing (`--post`)
+
+Run commands on downloaded files, scoped by MIME type. Format is `mimetype:command` where `{}` is replaced with the file path.
+
+```bash
+# Single rule
+--post='text/html:markitdown {} > {}.md'
+
+# Multiple rules (separated by \n)
+--post='image/*:convert {} {}.webp\ntext/html:markitdown {} > {}.md'
+
+# Rules from a file (one per line, # comments supported)
+--post=@rules.txt
+```
+
+MIME patterns support `*` globbing — `image/*` matches `image/png`, `image/jpeg`, etc. Use `*` or `*/*` to match everything.
+
+Example rules file:
+```
+# Convert HTML to markdown
+text/html: markitdown {} > {}.md
+
+# Compress all images to webp
+image/*: convert {} {}.webp
+```
 
 ## Custom Fetch Method
 

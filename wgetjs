@@ -39,7 +39,10 @@ URL Filtering:
   -I, --include-dirs=LIST Include only these directories
   -X, --exclude-dirs=LIST Exclude these directories
   --ignore-case         Ignore case when matching files/directories
-  --post=CMD            Run CMD after each download ({} = downloaded file path)
+  --post=RULES          Run post-processing commands scoped by MIME type
+                        Format: mimetype:command (e.g., text/html:markitdown {} > {}.md)
+                        Supports glob patterns (e.g., image/*:convert {} {}.webp)
+                        Use @filename to read rules from a newline-delimited file
 
 Other:
   -E, --adjust-extension  Append .html to filenames that don't already have it
@@ -53,6 +56,9 @@ Examples:
   wgetjs -r -D example.com,cdn.example.com http://example.com/
   wgetjs --method='curl -s {}' http://example.com/
   wgetjs --method='playwright fetch {}' http://example.com/
+  wgetjs -r --post='text/html:markitdown {} > {}.md' http://example.com/
+  wgetjs -r --post='image/*:convert {} {}.webp' http://example.com/
+  wgetjs -r --post=@post-rules.txt http://example.com/
 `);
   process.exit(1);
 }
@@ -95,6 +101,47 @@ if (opts.help) {
   usage();
 }
 
+// Parse --post rules: mime-type scoped post-processing commands
+function parsePostRules(postArg) {
+  if (!postArg) return null;
+
+  const rules = [];
+  let lines;
+
+  if (postArg.startsWith('@')) {
+    // Read rules from file
+    const rulesFile = postArg.slice(1);
+    try {
+      lines = fs.readFileSync(rulesFile, 'utf-8').split('\n');
+    } catch (e) {
+      console.error(`Error: cannot read post-rules file: ${rulesFile}`);
+      process.exit(1);
+    }
+  } else {
+    // Inline rules, split on literal \n (backslash-n in shell argument)
+    lines = postArg.split('\\n');
+  }
+
+  for (let line of lines) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+    const colonIdx = line.indexOf(':');
+    if (colonIdx === -1) {
+      console.error(`Error: invalid --post rule (missing mime:command format): ${line}`);
+      process.exit(1);
+    }
+    const mimePattern = line.slice(0, colonIdx).trim();
+    const command = line.slice(colonIdx + 1).trim();
+    if (!mimePattern || !command) {
+      console.error(`Error: invalid --post rule (empty mime or command): ${line}`);
+      process.exit(1);
+    }
+    rules.push({ mimePattern, command });
+  }
+
+  return rules.length > 0 ? rules : null;
+}
+
 // Extract options
 const startUrl = opts._[0];
 if (!startUrl) {
@@ -121,7 +168,7 @@ const waitSeconds = parseFloat(opts.wait) || 0;
 const waitRetry = parseFloat(opts.waitretry) || 0;
 const randomWait = opts['random-wait'];
 const method = opts.method;
-const postCommand = opts.post;
+const postRules = parsePostRules(opts.post);
 const spanHosts = opts.H;
 const relativeOnly = opts.L;
 const ignoreCase = opts['ignore-case'];
@@ -416,19 +463,34 @@ function savePage(urlStr, html, mimeType) {
   return filePath;
 }
 
-function runPostProcess(filePath) {
-  if (!postCommand) return;
-  
-  // Substitute {} with the properly shell-escaped file path using shell-quote library
-  const cmd = postCommand.replace(/\{\}/g, shellEscape([filePath]));
-  
-  try {
-    execSync(cmd, {
-      stdio: ['pipe', 'inherit', 'inherit'],
-      timeout: 60000,
-    });
-  } catch (e) {
-    console.error(`  Post-process failed: ${cmd}`);
+function mimeMatches(mimeType, pattern) {
+  if (pattern === '*' || pattern === '*/*') return true;
+  if (pattern.endsWith('/*')) {
+    // e.g. image/* matches image/png, image/jpeg, etc.
+    const prefix = pattern.slice(0, -1); // "image/"
+    return mimeType.startsWith(prefix);
+  }
+  return mimeType === pattern;
+}
+
+function runPostProcess(filePath, mimeType) {
+  if (!postRules) return;
+
+  const mime = (mimeType || 'application/octet-stream').split(';')[0].trim();
+
+  for (const rule of postRules) {
+    if (mimeMatches(mime, rule.mimePattern)) {
+      const escaped = shellEscape([filePath]);
+      const cmd = rule.command.replace(/\{\}/g, escaped);
+      try {
+        execSync(cmd, {
+          stdio: ['pipe', 'inherit', 'inherit'],
+          timeout: 60000,
+        });
+      } catch (e) {
+        console.error(`  Post-process failed: ${cmd}`);
+      }
+    }
   }
 }
 
@@ -781,7 +843,7 @@ async function main() {
 
       if (result) {
         const savedPath = savePage(url, result.rendered, result.mimeType);
-        runPostProcess(savedPath);
+        runPostProcess(savedPath, result.mimeType);
         downloaded++;
         lastDownloadTime = Date.now();
 
