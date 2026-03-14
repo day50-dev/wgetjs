@@ -540,18 +540,6 @@ function shouldFollow(urlStr) {
     // Cycle detection
     if (hasPathCycle(parsed.pathname)) return false;
 
-    // Default static asset skip (only if no explicit accept list)
-    if (!acceptExts) {
-      const ext = path.extname(parsed.pathname).toLowerCase();
-      const skip = [
-        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp',
-        '.css', '.js', '.woff', '.woff2', '.ttf', '.eot',
-        '.zip', '.tar', '.gz', '.mp3', '.mp4', '.avi',
-        '.mov', '.xml', '.json', '.rss', '.atom',
-      ];
-      if (skip.includes(ext)) return false;
-    }
-
     return true;
   } catch {
     return false;
