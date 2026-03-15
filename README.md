@@ -6,7 +6,9 @@ Why do we have to write code to `wget -r` a site with Javascript? So stupid.
 
 Finally, here is a **wget for SPAs and JS sites.** About fucking time.
 
-wgetjs is a command-line tool that brings wget-style recursive downloading to modern dynamic websites. Unlike traditional wget, wgetjs uses a headless Chrome browser to render JavaScript, ensuring you capture the fully-rendered HTML that SPAs and dynamic sites generate.
+It's compatible with wget. Well the parts I care about at last.
+
+**wgetjs** is a command-line tool that brings wget-style recursive downloading to modern dynamic websites. Unlike traditional wget, wgetjs uses a headless Chrome browser to render JavaScript, ensuring you capture the fully-rendered HTML that SPAs and dynamic sites generate.
 
 Does it work for everything? No, you can do all kinds of stupid things with JS. This only covers most of them.
 
