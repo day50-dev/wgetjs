@@ -1,6 +1,6 @@
 {
   "name": "wgetjs",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "wget for SPAs and JavaScript-heavy websites - renders JavaScript before downloading",
   "main": "wgetjs",
   "bin": {

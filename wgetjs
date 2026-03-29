@@ -8,11 +8,13 @@ const path = require('path');
 const { quote: shellEscape } = require('shell-quote');
 const getopts = require('getopts');
 
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8')).version;
+
 // Debug: print argv to see what's happening
 // console.error('DEBUG argv:', JSON.stringify(process.argv));
 
 function usage() {
-  console.error(`wgetjs - wget for SPAs and JavaScript-heavy websites
+  console.error(`wgetjs - wget for SPAs and JavaScript-heavy websites (v${VERSION})
 
 Usage: wgetjs [options] <url>
 
@@ -47,6 +49,7 @@ URL Filtering:
 Other:
   -E, --adjust-extension  Append .html to filenames that don't already have it
   --method=CMD          Custom fetch command ({} = URL, appended by default)
+  -v, --version         Show version number
   -h, --help              Show this help message
 
 Examples:
@@ -68,7 +71,7 @@ Examples:
 // We need to include all single-letter flags as booleans to prevent them
 // from consuming subsequent arguments as values
 const opts = getopts(process.argv.slice(2), {
-  boolean: ['r', 'c', 'n', 'p', 'H', 'L', 'E', 'random-wait', 'ignore-case', 'h', 'help'],
+  boolean: ['r', 'c', 'n', 'p', 'H', 'L', 'E', 'random-wait', 'ignore-case', 'h', 'help', 'v', 'version'],
   string: ['P', 'workers', 'l', 'level', 'w', 'wait', 'waitretry', 'A', 'accept', 'R', 'reject',
     'accept-regex', 'reject-regex', 'regex-type', 'D', 'domains', 'exclude-domains',
     'I', 'include-dirs', 'X', 'exclude-dirs', 'post', 'method'],
@@ -88,6 +91,7 @@ const opts = getopts(process.argv.slice(2), {
     'X': ['exclude-dirs'],
     'E': ['adjust-extension'],
     'h': ['help'],
+    'v': ['version'],
   },
   default: {
     workers: 1,
@@ -99,6 +103,11 @@ const opts = getopts(process.argv.slice(2), {
 
 if (opts.help) {
   usage();
+}
+
+if (opts.version) {
+  console.log(`wgetjs v${VERSION}`);
+  process.exit(0);
 }
 
 // Parse --post rules: mime-type scoped post-processing commands
@@ -151,7 +160,7 @@ if (!startUrl) {
 
 let startUrlWithScheme = startUrl;
 if (!/^https?:\/\//i.test(startUrlWithScheme)) {
-  startUrlWithScheme = 'http://' + startUrlWithScheme;
+  startUrlWithScheme = 'https://' + startUrlWithScheme;
 }
 
 const startParsed = new URL(startUrlWithScheme);
@@ -823,6 +832,13 @@ async function main() {
 
       const filePath = urlToFilePath(url);
       if (fs.existsSync(filePath)) {
+        const stat = fs.statSync(filePath);
+        if (stat.isDirectory()) {
+          console.log(`[W${workerIdx}] Skipping (is directory): ${url}`);
+          pending--;
+          if (pending === 0 && queue.length === 0 && !queue.isDone) queue.finish();
+          continue;
+        }
         console.log(`[W${workerIdx}] Skipping (exists): ${url}`);
         if (recursive) {
           const html = fs.readFileSync(filePath, 'utf-8');
