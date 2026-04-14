@@ -16,7 +16,7 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'),
 function usage() {
   console.error(`wgetjs - wget for SPAs and JavaScript-heavy websites (v${VERSION})
 
-Usage: wgetjs [options] <url>
+Usage: wgetjs [options] <url> [url ...]
 
 Download Control:
   -r                      Recursive download (follow links)
@@ -151,19 +151,33 @@ function parsePostRules(postArg) {
   return rules.length > 0 ? rules : null;
 }
 
-// Extract options
-const startUrl = opts._[0];
-if (!startUrl) {
-  console.error('Error: URL is required');
+// Extract options - support multiple URLs
+const startUrls = opts._.filter(url => url);
+if (startUrls.length === 0) {
+  console.error('Error: At least one URL is required');
   usage();
 }
 
-let startUrlWithScheme = startUrl;
-if (!/^https?:\/\//i.test(startUrlWithScheme)) {
-  startUrlWithScheme = 'https://' + startUrlWithScheme;
+// Normalize all URLs using the URL module - add https:// scheme if missing, then reparse to validate
+const normalizedUrls = [];
+for (const raw of startUrls) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    try {
+      url = new URL('https://' + raw);
+    } catch {
+      console.error(`Error: invalid URL: ${raw}`);
+      process.exit(1);
+    }
+  }
+  normalizedUrls.push(url.href);
 }
 
-const startParsed = new URL(startUrlWithScheme);
+// Parse the first URL to use as the base for -L (relative links) and -np (no parent) checks
+const startUrl = normalizedUrls[0];
+const startParsed = new URL(startUrl);
 
 // Handle -np: getopts expands it to -n -p, so check for combined np or n+p both being true
 const noParent = opts.np || (opts.n && opts.p);
@@ -737,7 +751,8 @@ class WorkQueue {
 async function main() {
   const useCdp = !method;
 
-  console.log(`Starting download from: ${startUrl}`);
+  console.log(`Starting download from ${normalizedUrls.length} URL(s):`);
+  normalizedUrls.forEach(u => console.log(`  ${u}`));
   if (recursive) console.log('Recursive mode enabled');
   if (noParent) console.log('No-parent mode enabled');
   console.log(`Workers: ${parallelism}`);
@@ -745,9 +760,15 @@ async function main() {
   // Shared state
   const visited = new Set();
   const queue = new WorkQueue();
-  const firstUrl = normalizeUrl(startUrl);
-  visited.add(firstUrl);
-  queue.push({ url: firstUrl, depth: 0 });
+
+  // Enqueue all URLs
+  for (const url of normalizedUrls) {
+    const normalized = normalizeUrl(url);
+    if (!visited.has(normalized)) {
+      visited.add(normalized);
+      queue.push({ url: normalized, depth: 0 });
+    }
+  }
 
   // Launch Chrome instances (one per worker) if using CDP
   const chromeProcs = [];
@@ -791,7 +812,7 @@ async function main() {
 
   let downloaded = 0;
   // Track pending work items - incremented on enqueue, decremented on complete
-  let pending = 1;  // Start with 1 for the seed URL
+  let pending = normalizedUrls.length;
 
   function enqueueLinks(html, baseUrl, depth) {
     if (depth >= maxDepth) return;
