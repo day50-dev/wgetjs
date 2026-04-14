@@ -29,6 +29,7 @@
   "homepage": "https://github.com/kristopolous/wgetjs#readme",
   "dependencies": {
     "getopts": "^2.3.0",
-    "shell-quote": "^1.8.3"
+    "shell-quote": "^1.8.3",
+    "ws": "^8.18.0"
   }
 }

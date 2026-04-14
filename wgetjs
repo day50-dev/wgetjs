@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { quote: shellEscape } = require('shell-quote');
 const getopts = require('getopts');
+const WebSocket = require('ws');
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8')).version;
 
