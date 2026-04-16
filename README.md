@@ -1,3 +1,5 @@
+Ever crawl a site and get a bunch of garbage back? Content that relies on JavaScript, pages of navigational headers, sidebars and footers... and your content just... not... there...
+
 **wgetjs**, part of the [DAY50](https://day50.dev) suite of open-source tools for AI workflows, allows for crawling webpages which require javascript while maintaining backwards compatibilty with GNU wget's command line syntax.
 
 **wgetjs** is a command-line tool that brings wget-style recursive downloading to modern dynamic websites. Unlike traditional wget, wgetjs uses a headless Chrome browser to render JavaScript, ensuring you capture the fully-rendered HTML that SPAs and dynamic sites generate.
