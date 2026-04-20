@@ -10,7 +10,7 @@ Unlike traditional wget, wgetjs uses a headless Chrome browser to render JavaScr
 
 Does it work for everything? 
 
-No, you can do all kinds of stupid things with JS. This only covers most of them.
+You can do all kinds of stupid things with JS. This only covers most of them.
 
 ## Usage
 
