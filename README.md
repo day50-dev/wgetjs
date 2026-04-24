@@ -118,7 +118,7 @@ By default, wgetjs uses headless Chrome via the Chrome DevTools Protocol. If you
 
 ```bash
 # URL is appended by default
-wgetjs --method="lightpanda fetch --dump" http://somesite.com/
+wgetjs --method="lightpanda --dump markdown" http://somesite.com/
 
 # Or use {} for explicit URL placement (like --post)
 wgetjs --method="curl -s {} | tidy -q -" http://somesite.com/
